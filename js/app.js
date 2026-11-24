@@ -127,10 +127,30 @@ function tableMenu(anchor, t) {
 function homeMenu(anchor) {
   showPop(anchor, [
     { label: 'Vyzkoušet ukázkovou tabulku', icon: 'table', act: createDemo },
+    { label: 'Smazat více tabulek', sub: 'Zaškrtnete, které smazat', icon: 'trash', act: bulkDelete },
     '-',
     { label: 'Zálohovat všechna data', sub: 'Stáhne soubor .json – přenesete ho i do jiného zařízení', icon: 'save', act: exportBackup },
     { label: 'Obnovit ze zálohy', sub: 'Načte soubor .json ze zálohy', icon: 'upload', act: () => $('#backupIn').click() },
   ]);
+}
+
+async function bulkDelete() {
+  if (!S.tables.length) { toast('Nemáte žádné tabulky'); return; }
+  const list = [...S.tables].sort((a, b) => a.name.localeCompare(b.name, 'cs'));
+  const f = await openDlg('Smazat tabulky', `<p>Zaškrtněte tabulky, které chcete smazat. Původní soubory v počítači zůstanou.</p>
+    <div class="pick">${list.map(t => `<label><input type="checkbox" name="t" value="${esc(t.id)}">${esc(t.name)}<small>${rowsTxt(t.rows.length)}</small></label>`).join('')}</div>
+    <div class="row"><button type="button" class="link" data-pick="1">Vybrat vše</button><button type="button" class="link" data-pick="0">Zrušit výběr</button></div>`, 'Smazat vybrané', form => {
+    form.addEventListener('click', e => { const b = e.target.closest('[data-pick]'); if (b) $$('input[name=t]', form).forEach(x => x.checked = b.dataset.pick === '1'); });
+  }, true);
+  if (!f) return;
+  const ids = f.getAll('t');
+  if (!ids.length) { toast('Nic nebylo vybráno'); return; }
+  if (!await confirmDlg('Opravdu smazat?', `Smaže se ${pl(ids.length, 'tabulka', 'tabulky', 'tabulek')}. Vrátit to nepůjde.`, 'Smazat')) return;
+  for (const id of ids) await DB.del('tables', id);
+  S.tables = S.tables.filter(t => !ids.includes(t.id));
+  if (S.cur && ids.includes(S.cur.id)) S.cur = null;
+  renderHome(); go('home', false);
+  toast(`Smazáno ${pl(ids.length, 'tabulka', 'tabulky', 'tabulek')}`);
 }
 
 async function addTable(t, open = true) {
