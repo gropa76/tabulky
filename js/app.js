@@ -692,9 +692,10 @@ function colSelect(key, val, cols, extra = '') {
   return `<select data-k="${key}" class="${miss ? 'miss' : ''}">${miss ? `<option value="${esc(val)}" selected>⚠ ${esc(val)} (v tabulce chybí)</option>` : ''}${!val ? '<option value="" selected>Vyberte sloupec…</option>' : ''}${extra}${cols.map(c => `<option ${c === val ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>`;
 }
 const optList = (obj, val) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === val ? 'selected' : ''}>${esc(v)}</option>`).join('');
-function checks(key, sel, cols) {
-  const missing = (sel || []).filter(c => !cols.includes(c));
-  return `<div class="chk" data-arr="${key}">${[...cols, ...missing].map(c => `<label${missing.includes(c) ? ' style="border-color:var(--warn);color:var(--warn)"' : ''}><input type="checkbox" value="${esc(c)}" ${(sel || []).includes(c) ? 'checked' : ''}>${missing.includes(c) ? '⚠ ' : ''}${esc(c)}</label>`).join('')}</div>`;
+function checks(key, sel, cols, numbered) {
+  sel = sel || [];
+  const missing = sel.filter(c => !cols.includes(c));
+  return `<div class="chk" data-arr="${key}">${[...cols, ...missing].map(c => { const n = sel.indexOf(c); return `<label${missing.includes(c) ? ' style="border-color:var(--warn);color:var(--warn)"' : ''}><input type="checkbox" value="${esc(c)}" ${n >= 0 ? 'checked' : ''}>${numbered && n >= 0 && sel.length > 1 ? `<b class="ord">${n + 1}.</b>` : ''}${missing.includes(c) ? '⚠ ' : ''}${esc(c)}</label>`; }).join('')}</div>`;
 }
 function operand(key, o, cols) {
   const isNum = o.t === 'num';
@@ -706,13 +707,13 @@ function stepBody(s, cols) {
     case 'filter': return `<label class="fld">Sloupec${colSelect('col', s.col, cols)}</label>
       <label class="fld">Podmínka<select data-k="op">${optList(Pipeline.OPS, s.op)}</select></label>
       ${['empty', 'nempty'].includes(s.op) ? '' : `<label class="fld">Hodnota<input type="text" data-k="val" value="${esc(s.val)}" placeholder="např. Břeclav nebo 1000"></label>`}`;
-    case 'group': return `<div class="fld">Seskupit podle${checks('by', s.by, cols)}</div>
+    case 'group': return `<div class="fld">Seskupit podle${checks('by', s.by, cols, true)}</div>
       <div class="fld">Spočítat${(s.aggs || []).map((a, i) => `<div class="agg"><select data-k="aggs.${i}.fn">${optList(Pipeline.AGG, a.fn)}</select>${a.fn === 'count' ? colSelect(`aggs.${i}.col`, a.col, cols, `<option value="" ${!a.col ? 'selected' : ''}>Řádky</option>`).replace('<option value="" selected>Vyberte sloupec…</option>', '') : colSelect(`aggs.${i}.col`, a.col, cols)}<button type="button" class="icon-btn" data-aggdel="${i}" aria-label="Odebrat">${ico('x')}</button></div>`).join('')}
       <button type="button" class="link" data-aggadd>+ Další výpočet</button></div>`;
     case 'subtotal': return `<div class="fld2"><label class="fld">Skupina (např. odběratel)${colSelect('group', s.group, cols)}</label>
       <label class="fld">Podskupina (např. zboží)${colSelect('sub', s.sub, cols, `<option value="" ${!s.sub ? 'selected' : ''}>— bez podskupiny —</option>`).replace('<option value="" selected>Vyberte sloupec…</option>', '')}</label></div>
-      <div class="fld">Sečíst sloupce${checks('vals', s.vals, cols)}</div>
-      <div class="fld">Zobrazit i sloupce (např. město) – jen vedle skupiny, nesčítají se${checks('extra', s.extra || [], cols.filter(c => c !== s.group && c !== s.sub))}</div>
+      <div class="fld">Sečíst sloupce – ve výstupu budou v pořadí, v jakém je zaškrtnete${checks('vals', s.vals, cols, true)}</div>
+      <div class="fld">Zobrazit i sloupce (např. město) – jen vedle skupiny, nesčítají se${checks('extra', s.extra || [], cols.filter(c => c !== s.group && c !== s.sub), true)}</div>
       <div class="fld2"><label class="fld">Funkce<select data-k="fn">${optList(Pipeline.AGG, s.fn)}</select></label>
       <div class="fld">&nbsp;<div class="chk"><label><input type="checkbox" data-k="cnt" ${s.cnt ? 'checked' : ''}> Počet řádků</label></div></div></div>`;
     case 'pivot': return `<div class="fld2"><label class="fld">Řádky${colSelect('row', s.row, cols)}</label><label class="fld">Sloupce${colSelect('col', s.col, cols)}</label></div>
@@ -724,7 +725,7 @@ function stepBody(s, cols) {
     case 'datepart': return `<label class="fld">Sloupec s datem${colSelect('col', s.col, cols)}</label>
       <div class="fld2"><label class="fld">Vytáhnout<select data-k="part">${optList(Pipeline.PARTS, s.part)}</select></label><label class="fld">Název sloupce<input type="text" data-k="name" value="${esc(s.name)}"></label></div>`;
     case 'sort': return `<div class="fld2"><label class="fld">Sloupec${colSelect('col', s.col, cols)}</label><label class="fld">Pořadí<select data-k="dir"><option value="asc" ${s.dir === 'asc' ? 'selected' : ''}>Od nejmenšího</option><option value="desc" ${s.dir === 'desc' ? 'selected' : ''}>Od největšího</option></select></label></div>`;
-    case 'select': return `<div class="fld">Ponechat sloupce${checks('cols', s.cols, cols)}</div><div class="row"><button type="button" class="link" data-all="1">Vybrat vše</button><button type="button" class="link" data-all="0">Zrušit vše</button></div>`;
+    case 'select': return `<div class="fld">Ponechat sloupce (v pořadí zaškrtnutí)${checks('cols', s.cols, cols, true)}</div><div class="row"><button type="button" class="link" data-all="1">Vybrat vše</button><button type="button" class="link" data-all="0">Zrušit vše</button></div>`;
     case 'rename': return `<div class="fld2"><label class="fld">Sloupec${colSelect('col', s.col, cols)}</label><label class="fld">Nový název<input type="text" data-k="to" value="${esc(s.to)}"></label></div>`;
     case 'dedupe': return `<div class="fld">Porovnat podle (nic nezaškrtnuto = celé řádky)${checks('cols', s.cols, cols)}</div>`;
     case 'limit': return `<label class="fld">Počet řádků<input type="number" min="0" data-k="n" value="${esc(s.n)}"></label>`;
@@ -767,7 +768,9 @@ stepsEl.addEventListener('change', e => {
     s[el.dataset.op] = el.value === '__num' ? { t: 'num', v: 1 } : { t: 'col', v: el.value };
   } else if (el.closest('[data-arr]')) {
     const box = el.closest('[data-arr]');
-    s[box.dataset.arr] = $$('input:checked', box).map(x => x.value);
+    const now = $$('input:checked', box).map(x => x.value), prev = s[box.dataset.arr] || [];
+    // pořadí = pořadí zaškrtnutí
+    s[box.dataset.arr] = [...prev.filter(c => now.includes(c)), ...now.filter(c => !prev.includes(c))];
   }
   stepChanged();
 });

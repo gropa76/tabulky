@@ -145,6 +145,7 @@ h1.h-sm{font-size:20px}
 .chk label{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:6px 11px;font-size:13px;color:var(--ink);font-weight:450;cursor:pointer;background:var(--surface)}
 .chk label:has(input:checked){background:var(--acc-soft);border-color:var(--acc);color:var(--acc)}
 .chk input{margin:0;accent-color:var(--acc)}
+.chk .ord{font-size:12px;background:var(--acc);color:var(--acc-ink);border-radius:999px;padding:0 6px;line-height:18px}
 .agg{display:grid;grid-template-columns:1fr 1.3fr 32px;gap:6px;align-items:center}
 .agg .icon-btn{width:32px;height:32px}
 .link{background:none;border:0;color:var(--acc);font-weight:600;cursor:pointer;padding:4px 0;text-align:left;font-size:13px}
