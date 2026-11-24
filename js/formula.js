@@ -214,6 +214,24 @@ const Formula = (() => {
     deleteRow: (t, i) => eachFormula(t, f => rewrite(f, delMap(i + 2), id)),
     insertCol: (t, i) => eachFormula(t, f => rewrite(f, id, insMap(i))),
     deleteCol: (t, i) => eachFormula(t, f => rewrite(f, id, delMap(i))),
+    // ponechá jen vybrané řádky (indexy dat) a přepočítá odkazy ve vzorcích najednou
+    keepRows: (t, keep) => {
+      const n = t.rows.length, newOf = new Array(n).fill(-1);
+      keep.forEach((old, i) => { newOf[old] = i; });
+      const nextKept = new Array(n + 1).fill(-1), prevKept = new Array(n).fill(-1);
+      for (let i = n - 1, last = -1; i >= 0; i--) { if (newOf[i] >= 0) last = newOf[i]; nextKept[i] = last; }
+      for (let i = 0, last = -1; i < n; i++) { if (newOf[i] >= 0) last = newOf[i]; prevKept[i] = last; }
+      const mr = (x, mode) => {
+        const i = x - 2;
+        if (i < 0) return x;
+        if (i >= n) return x - (n - keep.length);
+        if (mode === 'single') return newOf[i] >= 0 ? newOf[i] + 2 : null;
+        if (mode === 'start') return nextKept[i] >= 0 ? nextKept[i] + 2 : null;
+        return prevKept[i] >= 0 ? prevKept[i] + 2 : null;
+      };
+      t.rows = keep.map(i => t.rows[i]);
+      eachFormula(t, f => rewrite(f, mr, id));
+    },
     moveRow: (row, dr) => { for (let c = 0; c < row.length; c++) if (isF(row[c])) row[c] = rewrite(row[c], (x, m, abs) => abs ? x : x + dr, id); },
   };
 

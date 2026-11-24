@@ -245,8 +245,11 @@ function parseSheet(ws) {
   }
   if (maxC < 0) return null;
   const fromA1 = range.s.r === 0 && range.s.c === 0;
-  const grid = [], formulas = [];
+  const grid = [], formulas = [], hiddenRows = [];
+  const rowInfo = ws['!rows'] || [];
+  const hasFilter = !!ws['!autofilter'];
   for (let r = range.s.r; r <= maxR; r++) {
+    hiddenRows.push(!!(rowInfo[r] && rowInfo[r].hidden));
     const row = [], fr = [];
     for (let c = range.s.c; c <= maxC; c++) {
       const cell = ws[XLSX.utils.encode_cell({ r, c })];
@@ -261,8 +264,9 @@ function parseSheet(ws) {
   const width = maxC - range.s.c + 1;
   const cols = [];
   for (let c = 0; c < width; c++) { const h = grid[0][c]; cols.push(uniqueCol(cols, h == null || String(h)[0] === '=' ? 'Sloupec ' + L(c) : String(h).trim())); }
-  const rows = grid.slice(1), fs = formulas.slice(1);
-  while (rows.length && rows[rows.length - 1].every(v => v == null)) { rows.pop(); fs.pop(); }
+  const rows = grid.slice(1), fs = formulas.slice(1), hid = hiddenRows.slice(1);
+  while (rows.length && rows[rows.length - 1].every(v => v == null)) { rows.pop(); fs.pop(); hid.pop(); }
+  const hiddenIdx = new Set(); hid.forEach((h, i) => { if (h) hiddenIdx.add(i); });
   const subIdx = new Set();
   rows.forEach((r, i) => {
     const filled = r.filter(v => v != null).length;
@@ -283,14 +287,14 @@ function parseSheet(ws) {
     if (Math.abs(sum - val) <= Math.max(0.06, Math.abs(val) * 0.001)) subIdx.add(i);
     break;
   }
-  return { columns: cols, rows, subIdx };
+  return { columns: cols, rows, subIdx, hiddenIdx, hasFilter };
 }
 
 async function importFiles(files) {
   let n = 0, last = null, skippedTotal = 0;
   for (const f of files) {
     let wb;
-    try { wb = XLSX.read(await f.arrayBuffer(), { type: 'array', cellDates: true, cellFormula: true, sheetStubs: true }); }
+    try { wb = XLSX.read(await f.arrayBuffer(), { type: 'array', cellDates: true, cellFormula: true, sheetStubs: true, cellStyles: true }); }
     catch (e) { toast(`Soubor ${f.name} se nepodařilo načíst`); continue; }
     const base = f.name.replace(/\.[^.]+$/, '');
     const meta = (wb.Workbook && wb.Workbook.Sheets) || [];
@@ -298,25 +302,35 @@ async function importFiles(files) {
     if (!sheets.length) { toast(`V souboru ${f.name} nejsou žádná data`); continue; }
     let chosen = sheets.filter(x => !x.hidden).slice(0, 1);
     if (!chosen.length) chosen = [sheets[0]];
-    let skipSub = true;
+    let skipSub = true, onlyVis = false;
     const subCount = sheets.reduce((s, x) => s + x.data.subIdx.size, 0);
-    if (sheets.length > 1 || subCount) {
+    const hidCount = sheets.reduce((s, x) => s + x.data.hiddenIdx.size, 0);
+    const anyFilter = sheets.some(x => x.data.hasFilter && x.data.hiddenIdx.size);
+    if (sheets.length > 1 || subCount || hidCount) {
       const body = `${sheets.length > 1 ? `<p>Soubor <b>${esc(f.name)}</b> má víc listů. Vyberte, které načíst:</p>
         <div class="pick">${sheets.map((x, i) => `<label><input type="checkbox" name="s" value="${i}" ${chosen.includes(x) ? 'checked' : ''}>${esc(x.sn)}${x.hidden ? ' (skrytý)' : ''}<small>${rowsTxt(x.data.rows.length - x.data.subIdx.size)}</small></label>`).join('')}</div>` : `<p>Soubor <b>${esc(f.name)}</b></p>`}
         ${subCount ? `<div class="chk"><label><input type="checkbox" name="sub" checked> Vynechat řádky se součty z Excelu („… Celkem“, „Celkový součet“)</label></div>
-        <p>Jinak by se v appce sečetly podruhé.</p>` : ''}`;
+        <p>Jinak by se v appce sečetly podruhé.</p>` : ''}
+        ${hidCount ? `<div class="chk"><label><input type="checkbox" name="vis" ${anyFilter ? 'checked' : ''}> Jen řádky viditelné ve filtru Excelu (skryto ${rowsTxt(hidCount)})</label></div>` : ''}`;
       const res = await openDlg('Import tabulky', body, 'Načíst');
       if (!res) continue;
       if (sheets.length > 1) chosen = res.getAll('s').map(i => sheets[+i]);
       skipSub = subCount ? res.get('sub') === 'on' : false;
+      onlyVis = hidCount ? res.get('vis') === 'on' : false;
       if (!chosen.length) continue;
     }
     for (const x of chosen) {
       const d = x.data;
       const tmp = { columns: d.columns, rows: d.rows.map(r => [...r]) };
-      if (skipSub) [...d.subIdx].sort((a, b) => b - a).forEach(i => { tmp.rows.splice(i, 1); Formula.adjust.deleteRow(tmp, i); });
+      const keep = [];
+      for (let i = 0; i < tmp.rows.length; i++) {
+        if (skipSub && d.subIdx.has(i)) { skippedTotal++; continue; }
+        if (onlyVis && d.hiddenIdx.has(i)) continue;
+        if (tmp.rows[i].every(v => v == null)) continue;
+        keep.push(i);
+      }
+      if (keep.length !== tmp.rows.length) Formula.adjust.keepRows(tmp, keep);
       const rows = tmp.rows;
-      if (skipSub) skippedTotal += d.subIdx.size;
       const t = { name: chosen.length > 1 || sheets.length > 1 ? `${base} – ${x.sn}` : base, columns: d.columns, rows };
       await addTable(t, false); last = t; n++;
     }
