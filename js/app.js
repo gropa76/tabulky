@@ -270,6 +270,19 @@ function parseSheet(ws) {
     const label = r.some(v => typeof v === 'string' && /(^|\s)(celkem|celkový součet|celkovy soucet|mezisoučet|grand total|total)\s*$/i.test(v));
     if (hasSub || (label && filled <= 3)) subIdx.add(i);
   });
+  // ručně dopsaný celkový součet na konci: řádek s jediným číslem, které se rovná součtu sloupce nad ním
+  for (let i = rows.length - 1, checked = 0; i > 0 && checked < 3; i--) {
+    const filled = rows[i].map((v, c) => [v, c]).filter(([v]) => v != null);
+    if (!filled.length) continue;
+    checked++;
+    if (filled.length !== 1 || typeof filled[0][0] !== 'number') break;
+    const [val, c] = filled[0];
+    let sum = 0;
+    for (let k = 0; k < i; k++) { if (subIdx.has(k)) continue; const v = rows[k][c]; if (typeof v === 'number') sum += v; else if (typeof v === 'string' && v[0] === '=') { sum = NaN; break; } }
+    if (isNaN(sum)) { const t = Formula.evaluator({ columns: cols, rows }); sum = 0; for (let k = 0; k < i; k++) { if (subIdx.has(k)) continue; const v = t.get(k, c); if (typeof v === 'number') sum += v; } }
+    if (Math.abs(sum - val) <= Math.max(0.06, Math.abs(val) * 0.001)) subIdx.add(i);
+    break;
+  }
   return { columns: cols, rows, subIdx };
 }
 
@@ -685,6 +698,7 @@ function stepBody(s, cols) {
     case 'subtotal': return `<div class="fld2"><label class="fld">Skupina (např. odběratel)${colSelect('group', s.group, cols)}</label>
       <label class="fld">Podskupina (např. zboží)${colSelect('sub', s.sub, cols, `<option value="" ${!s.sub ? 'selected' : ''}>— bez podskupiny —</option>`).replace('<option value="" selected>Vyberte sloupec…</option>', '')}</label></div>
       <div class="fld">Sečíst sloupce${checks('vals', s.vals, cols)}</div>
+      <div class="fld">Zobrazit i sloupce (např. město) – jen vedle skupiny, nesčítají se${checks('extra', s.extra || [], cols.filter(c => c !== s.group && c !== s.sub))}</div>
       <div class="fld2"><label class="fld">Funkce<select data-k="fn">${optList(Pipeline.AGG, s.fn)}</select></label>
       <div class="fld">&nbsp;<div class="chk"><label><input type="checkbox" data-k="cnt" ${s.cnt ? 'checked' : ''}> Počet řádků</label></div></div></div>`;
     case 'pivot': return `<div class="fld2"><label class="fld">Řádky${colSelect('row', s.row, cols)}</label><label class="fld">Sloupce${colSelect('col', s.col, cols)}</label></div>

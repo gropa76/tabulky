@@ -62,7 +62,7 @@ const Pipeline = (() => {
       case 'filter': case 'sort': case 'rename': case 'datepart': return [s.col];
       case 'group': return [...(s.by || []), ...(s.aggs || []).filter(a => a.fn !== 'count' || a.col).map(a => a.col)];
       case 'pivot': return [s.row, s.col, s.fn === 'count' ? null : s.val];
-      case 'subtotal': return [s.group, s.sub || null, ...(s.vals || [])];
+      case 'subtotal': return [s.group, s.sub || null, ...(s.vals || []), ...(s.extra || [])];
       case 'calc': return [s.a?.t === 'col' ? s.a.v : null, s.b?.t === 'col' ? s.b.v : null, s.dest === 'over' ? s.target : null];
       case 'select': case 'dedupe': return s.cols || [];
       default: return [];
@@ -79,7 +79,7 @@ const Pipeline = (() => {
       case 'filter': return { type, col: t0, op: 'eq', val: '' };
       case 'group': return { type, by: t0 ? [t0] : [], aggs: [{ fn: 'sum', col: n0 }] };
       case 'pivot': return { type, row: t0, col: txtCols[1] || t0, val: n0, fn: 'sum' };
-      case 'subtotal': return { type, group: t0, sub: txtCols.find(c => c !== t0 && c !== txtCols[0]) || txtCols[1] || '', vals: numCols.length ? [n0] : [], fn: 'sum', cnt: false };
+      case 'subtotal': return { type, group: t0, sub: txtCols.find(c => c !== t0 && c !== txtCols[0]) || txtCols[1] || '', vals: numCols.length ? [n0] : [], extra: [], fn: 'sum', cnt: false };
       case 'calc': return { type, dest: 'new', name: 'Výpočet', target: n0, a: { t: 'col', v: numCols[0] || cols[0] || '' }, op: '*', b: { t: 'num', v: 1 }, round: '' };
       case 'datepart': return { type, col: d0, part: 'month', name: 'Měsíc' };
       case 'sort': return { type, col: n0, dir: 'desc' };
@@ -155,6 +155,8 @@ const Pipeline = (() => {
         const gi = ix(s.group), si = s.sub ? ix(s.sub) : -1, vals = s.vals || [], vi = vals.map(ix), fn = s.fn || 'sum';
         const k = v => v == null || v === '' ? '(prázdné)' : String(v).trim();
         const calc = list => [...(s.cnt ? [list.length] : []), ...vi.map(i => aggregate(fn, list.map(r => r[i])))];
+        const xi = (s.extra || []).map(ix);
+        const info = list => xi.map(i => { const u = [...new Set(list.map(r => r[i]).filter(v => v != null && v !== '').map(v => String(v).trim()))]; return u.length ? (u.length > 3 ? u.slice(0, 3).join(', ') + ' …' : u.join(', ')) : null; });
         const groups = new Map();
         for (const r of rows) { const g = k(r[gi]); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(r); }
         const out = [];
@@ -163,13 +165,14 @@ const Pipeline = (() => {
           if (si >= 0) {
             const subs = new Map();
             for (const r of list) { const x = k(r[si]); if (!subs.has(x)) subs.set(x, []); subs.get(x).push(r); }
-            for (const x of [...subs.keys()].sort(coll.compare)) out.push([g, x, ...calc(subs.get(x))]);
-            out.push([`Celkem ${g}`, null, ...calc(list)]);
-          } else out.push([g, ...calc(list)]);
+            const ex = info(list);
+            for (const x of [...subs.keys()].sort(coll.compare)) out.push([g, ...ex, x, ...calc(subs.get(x))]);
+            out.push([`Celkem ${g}`, ...ex, null, ...calc(list)]);
+          } else out.push([g, ...info(list), ...calc(list)]);
         }
-        out.push(si >= 0 ? ['CELKEM', null, ...calc(rows)] : ['CELKEM', ...calc(rows)]);
+        out.push(['CELKEM', ...xi.map(() => null), ...(si >= 0 ? [null] : []), ...calc(rows)]);
         const name = v => fn === 'sum' ? v : `${AGG[fn]} – ${v}`;
-        const outCols = [s.group, ...(si >= 0 ? [s.sub] : []), ...(s.cnt ? ['Počet řádků'] : []), ...vals.map(name)];
+        const outCols = [s.group, ...(s.extra || []), ...(si >= 0 ? [s.sub] : []), ...(s.cnt ? ['Počet řádků'] : []), ...vals.map(name)];
         const uniq = []; outCols.forEach(c => uniq.push(uniqueName(uniq, c)));
         return { columns: uniq, rows: out, totals: true };
       }
