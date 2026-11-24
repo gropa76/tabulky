@@ -100,6 +100,7 @@ const Formula = (() => {
       case 'COUNT': case 'POCET': return nums(args).length;
       case 'COUNTA': case 'POCET2': { let c = 0; for (const a of args) for (const v of (Array.isArray(a) ? a : [a])) if (v != null && v !== '') c++; return c; }
       case 'ROUND': case 'ZAOKROUHLIT': { const d = args.length > 1 ? toN(args[1]) : 0; const p = Math.pow(10, d); return Math.round((toN(args[0]) + Number.EPSILON) * p) / p; }
+      case 'SUBTOTAL': case 'SUBTOTAL2': { const k = toN(args[0]) % 100; const rest = args.slice(1); return call({ 1: 'AVERAGE', 2: 'COUNT', 3: 'COUNTA', 4: 'MAX', 5: 'MIN', 9: 'SUM' }[k] || 'X', rest); }
       case 'ABS': return Math.abs(toN(args[0]));
       case 'IF': case 'KDYZ': return truthy(args[0]) ? (args.length > 1 ? args[1] : true) : (args.length > 2 ? args[2] : false);
       case 'CONCAT': case 'CONCATENATE': case 'CONCATENATE2': case 'SPOJIT': return args.map(a => Array.isArray(a) ? a.map(toS).join('') : toS(a)).join('');

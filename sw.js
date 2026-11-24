@@ -1,6 +1,6 @@
 /* Offline režim: appka se uloží do zařízení a funguje i bez internetu.
    Při každé změně souborů zvyšte číslo verze, aby se telefon aktualizoval. */
-const VERZE = 'tabulky-v4';
+const VERZE = 'tabulky-v5';
 const SOUBORY = ['./', 'index.html', 'styles.css', 'manifest.webmanifest', 'js/formula.js', 'js/pipeline.js', 'js/db.js', 'js/app.js', 'lib/xlsx.bundle.js', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {

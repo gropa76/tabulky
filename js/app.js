@@ -33,7 +33,7 @@ function cellIn(v) {
     return d.getHours() || d.getMinutes() ? `${s} ${p(d.getHours())}:${p(d.getMinutes())}` : s;
   }
   if (typeof v === 'boolean') return v ? 'PRAVDA' : 'NEPRAVDA';
-  if (typeof v === 'string') return v.trim() === '' ? null : v;
+  if (typeof v === 'string') return v.trim() === '' ? null : v.trim();
   return v ?? null;
 }
 
@@ -212,41 +212,85 @@ async function mergeDialog() {
 }
 
 /* ---------- import / export ---------- */
+// načte jeden list do podoby { columns, rows, subIdx } – subIdx = řádky se součty z Excelu
+function parseSheet(ws) {
+  if (!ws || !ws['!ref']) return null;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  let maxC = -1, maxR = -1;
+  for (const k in ws) {
+    if (k[0] === '!') continue;
+    const cell = ws[k];
+    if (cell.f == null && (cell.v == null || cell.v === '' || (typeof cell.v === 'string' && !cell.v.trim()))) continue;
+    const a = XLSX.utils.decode_cell(k); if (a.c > maxC) maxC = a.c; if (a.r > maxR) maxR = a.r;
+  }
+  if (maxC < 0) return null;
+  const fromA1 = range.s.r === 0 && range.s.c === 0;
+  const grid = [], formulas = [];
+  for (let r = range.s.r; r <= maxR; r++) {
+    const row = [], fr = [];
+    for (let c = range.s.c; c <= maxC; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c })];
+      let v = cell ? cellIn(cell.t === 'z' ? null : cell.v) : null;
+      if (typeof v === 'string') v = v.trim() || null;
+      const f = cell && cell.f ? String(cell.f) : null;
+      if (f && fromA1 && !f.includes('!') && !/[\[{]/.test(f) && !/^SUBTOTAL\(/i.test(f)) v = '=' + f;
+      row.push(v); fr.push(f);
+    }
+    grid.push(row); formulas.push(fr);
+  }
+  const width = maxC - range.s.c + 1;
+  const cols = [];
+  for (let c = 0; c < width; c++) { const h = grid[0][c]; cols.push(uniqueCol(cols, h == null || String(h)[0] === '=' ? 'Sloupec ' + L(c) : String(h).trim())); }
+  const rows = grid.slice(1), fs = formulas.slice(1);
+  while (rows.length && rows[rows.length - 1].every(v => v == null)) { rows.pop(); fs.pop(); }
+  const subIdx = new Set();
+  rows.forEach((r, i) => {
+    const filled = r.filter(v => v != null).length;
+    const hasSub = fs[i].some(f => f && /SUBTOTAL\(/i.test(f));
+    const label = r.some(v => typeof v === 'string' && /(^|\s)(celkem|celkový součet|celkovy soucet|mezisoučet|grand total|total)\s*$/i.test(v));
+    if (hasSub || (label && filled <= 3)) subIdx.add(i);
+  });
+  return { columns: cols, rows, subIdx };
+}
+
 async function importFiles(files) {
-  let n = 0, last = null;
+  let n = 0, last = null, skippedTotal = 0;
   for (const f of files) {
-    try {
-      const wb = XLSX.read(await f.arrayBuffer(), { type: 'array', cellDates: true, cellFormula: true, sheetStubs: true });
-      const base = f.name.replace(/\.[^.]+$/, '');
-      for (const sn of wb.SheetNames) {
-        const ws = wb.Sheets[sn]; if (!ws['!ref']) continue;
-        const range = XLSX.utils.decode_range(ws['!ref']);
-        const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true, blankrows: true });
-        if (!aoa.length) continue;
-        const fromA1 = range.s.r === 0 && range.s.c === 0;
-        let width = Math.max(range.e.c - range.s.c + 1, ...aoa.map(r => r.length));
-        const grid = aoa.map((src, r) => {
-          const row = [];
-          for (let c = 0; c < width; c++) {
-            let v = cellIn(src[c]);
-            if (fromA1) { const cell = ws[XLSX.utils.encode_cell({ r, c })]; if (cell && cell.f && !cell.f.includes('!') && !/[\[{]/.test(cell.f)) v = '=' + cell.f; }
-            row.push(v);
-          }
-          return row;
-        });
-        while (width > 0 && grid.every(r => r[width - 1] == null)) { width--; grid.forEach(r => r.pop()); }
-        if (!width) continue;
-        const cols = [];
-        for (let c = 0; c < width; c++) { const h = grid[0][c]; cols.push(uniqueCol(cols, h == null || String(h).trim() === '' || String(h)[0] === '=' ? 'Sloupec ' + L(c) : String(h))); }
-        const rows = grid.slice(1);
-        while (rows.length && rows[rows.length - 1].every(v => v == null)) rows.pop();
-        const t = { name: wb.SheetNames.length > 1 ? `${base} – ${sn}` : base, columns: cols, rows };
-        await addTable(t, false); last = t; n++;
-      }
-    } catch (e) { toast(`Soubor ${f.name} se nepodařilo načíst`); }
+    let wb;
+    try { wb = XLSX.read(await f.arrayBuffer(), { type: 'array', cellDates: true, cellFormula: true, sheetStubs: true }); }
+    catch (e) { toast(`Soubor ${f.name} se nepodařilo načíst`); continue; }
+    const base = f.name.replace(/\.[^.]+$/, '');
+    const meta = (wb.Workbook && wb.Workbook.Sheets) || [];
+    const sheets = wb.SheetNames.map((sn, i) => ({ sn, hidden: !!(meta[i] && meta[i].Hidden), data: parseSheet(wb.Sheets[sn]) })).filter(x => x.data && x.data.rows.length);
+    if (!sheets.length) { toast(`V souboru ${f.name} nejsou žádná data`); continue; }
+    let chosen = sheets.filter(x => !x.hidden).slice(0, 1);
+    if (!chosen.length) chosen = [sheets[0]];
+    let skipSub = true;
+    const subCount = sheets.reduce((s, x) => s + x.data.subIdx.size, 0);
+    if (sheets.length > 1 || subCount) {
+      const body = `${sheets.length > 1 ? `<p>Soubor <b>${esc(f.name)}</b> má víc listů. Vyberte, které načíst:</p>
+        <div class="pick">${sheets.map((x, i) => `<label><input type="checkbox" name="s" value="${i}" ${chosen.includes(x) ? 'checked' : ''}>${esc(x.sn)}${x.hidden ? ' (skrytý)' : ''}<small>${rowsTxt(x.data.rows.length - x.data.subIdx.size)}</small></label>`).join('')}</div>` : `<p>Soubor <b>${esc(f.name)}</b></p>`}
+        ${subCount ? `<div class="chk"><label><input type="checkbox" name="sub" checked> Vynechat řádky se součty z Excelu („… Celkem“, „Celkový součet“)</label></div>
+        <p>Jinak by se v appce sečetly podruhé.</p>` : ''}`;
+      const res = await openDlg('Import tabulky', body, 'Načíst');
+      if (!res) continue;
+      if (sheets.length > 1) chosen = res.getAll('s').map(i => sheets[+i]);
+      skipSub = subCount ? res.get('sub') === 'on' : false;
+      if (!chosen.length) continue;
+    }
+    for (const x of chosen) {
+      const d = x.data;
+      const tmp = { columns: d.columns, rows: d.rows.map(r => [...r]) };
+      if (skipSub) [...d.subIdx].sort((a, b) => b - a).forEach(i => { tmp.rows.splice(i, 1); Formula.adjust.deleteRow(tmp, i); });
+      const rows = tmp.rows;
+      if (skipSub) skippedTotal += d.subIdx.size;
+      const t = { name: chosen.length > 1 || sheets.length > 1 ? `${base} – ${x.sn}` : base, columns: d.columns, rows };
+      await addTable(t, false); last = t; n++;
+    }
   }
   if (n === 1) openTable(last.id);
-  else if (n > 1) { toast(`Načteno ${pl(n, 'tabulka', 'tabulky', 'tabulek')}`); go('home'); }
+  else if (n > 1) go('home');
+  if (n) toast(`Načteno ${pl(n, 'tabulka', 'tabulky', 'tabulek')}` + (skippedTotal ? ` · vynecháno ${rowsTxt(skippedTotal)} se součty` : ''));
 }
 
 let dlCap = null;
